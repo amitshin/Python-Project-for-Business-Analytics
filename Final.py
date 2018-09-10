@@ -98,7 +98,7 @@ def IntoArray(ApiData):
         F.append(observation['visibility']['value'])
         G.append(observation['baro_pressure']['value'])
 
-    df = pd.DataFrame(A, columns=['Timestamp'])
+    df = pd.DataFrame(A, columns=['TimeIn'])
     df['feels_like'] = B
     df['precipitation_type'] = C
     df['precipitation'] = D
@@ -111,20 +111,14 @@ def IntoArray(ApiData):
 
 # Forecast weather data frame -> sqlite DB
 def Forecastsql(Forecastdf):
-    conn = sqlite3.connect("fore.db")
+    conn = sqlite3.connect("PyProject.db")
     Forecastdf.to_sql('ForecastDB', conn, if_exists='replace')
-    c = conn.cursor()
-    c.execute("SELECT * FROM ForecastDB")
-    print(c.fetchall())
 
 
-# Historical weather data frame into sqlite DB
+# Historical weather data frame -> sqlite DB
 def Histsql(Histdf):
-    conn = sqlite3.connect("hist.db")
+    conn = sqlite3.connect("PyProject.db")
     Histdf.to_sql('HistDB', conn, if_exists='replace')
-    c = conn.cursor()
-    c.execute("SELECT * FROM HistDB")
-    print(c.fetchall())
 
 
 # scraper: from scraper to df
@@ -143,11 +137,11 @@ def GetCrypto():
 
     table = soup.find('table', class_='table')
     for row in table.findAll('tr'):
-        cells = row.findAll ('td')
+        cells = row.findAll('td')
         if len(cells) == 7:
             date = parser.parse(cells[0].find(text=True))
 
-            A.append(date.isoformat())
+            A.append(date.isoformat() + '.000Z')
             B.append(cells[1].find(text=True))
             C.append(cells[2].find(text=True))
             D.append(cells[3].find(text=True))
@@ -155,8 +149,7 @@ def GetCrypto():
             F.append(cells[5].find(text=True))
             G.append(cells[6].find(text=True))
 
-
-    df = pd.DataFrame(A, columns=['Timestamp'])
+    df = pd.DataFrame(A, columns=['TimeIn'])
 
     df['Open'] = B
     df['High'] = C
@@ -170,12 +163,40 @@ def GetCrypto():
 
 # scraper: from df to sqlite
 def Cryptosql(df):
-    conn = sqlite3.connect("crypto.db")
+    conn = sqlite3.connect("PyProject.db")
     df.to_sql('CryptoDB', conn, if_exists='replace')
-    c = conn.cursor()
 
-    print(pd.read_sql_query("select * from CryptoDB;", conn))
 
+# Create training pandas df from sqlite DB query
+def Traindf():
+    conn = sqlite3.connect('PyProject.db')
+    df = pd.read_sql_query("""
+                           SELECT HistDB.TimeIn,
+                           HistDB.feels_like as Temperture,
+                           HistDB.precipitation as Precipitation,
+                           HistDB.precipitation_type as Precipitation_type,
+                           HistDB.visibility as Visibility,
+                           HistDB.wind_speed as Wind_speed,
+                           HistDB.baro_pressure as Baro_press,
+                           Volume
+                           FROM CryptoDB
+                           Inner join HistDB on
+                           HistDB.TimeIn = CryptoDB.TimeIn;
+                           """,
+                           conn)
+    return df
+
+
+def Rolloutdf():
+    conn = sqlite3.connect('PyProject.db')
+    df = pd.read_sql_query("""
+                               SELECT * 
+                               FROM ForecastDB
+                           """,
+                           conn)
+    df['Volume'] = '0'
+    del df['index']
+    return df
 
 # Main
 histdata = GetHistorical()
@@ -189,3 +210,8 @@ Forecastsql(forecastdf)
 cryptodf = GetCrypto()
 Cryptosql(cryptodf)
 
+train_df = Traindf()
+print(train_df)
+
+rollout_df = Rolloutdf()
+print(rollout_df)
